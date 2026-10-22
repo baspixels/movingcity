@@ -1151,7 +1151,7 @@ function setupPost(w, h) {
   const opts = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, type: half && w * h < 9e5 ? THREE.HalfFloatType : THREE.UnsignedByteType };
   [rtMain, rtA, rtB, rtC, rtD].forEach(r => r && r.dispose());
   rtMain = gl2 && THREE.WebGLMultisampleRenderTarget ? new THREE.WebGLMultisampleRenderTarget(w, h, opts) : new THREE.WebGLRenderTarget(w, h, opts);
-  if (rtMain.samples !== undefined) rtMain.samples = 2;
+  if (rtMain.samples !== undefined) rtMain.samples = (typeof LITE !== 'undefined' && LITE.tier >= 2) ? 0 : 2;
   const bw = Math.max(1, w >> 2), bh = Math.max(1, h >> 2);
   rtA = new THREE.WebGLRenderTarget(bw, bh, Object.assign({ depthBuffer: false }, opts));
   rtB = new THREE.WebGLRenderTarget(bw, bh, Object.assign({ depthBuffer: false }, opts));
@@ -11164,15 +11164,20 @@ const whenIdle = f => (window.requestIdleCallback ? requestIdleCallback(f, { tim
 /* ---- frame pacing: a steady 60 frames a second, never more ---- */
 const COOL = { last: -1e9, n: 0, slow: 0 };
 
-const LITE = { tier: 0, ups: 0, calm: 0, maxPR: Math.min(window.devicePixelRatio || 1, 1.5), mode: (() => { try { return localStorage.getItem('rht-gfx') || 'auto'; } catch (e) { return 'auto'; } })() };
+const LITE = { tier: (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 900) ? 2 : 0, ups: 0, calm: 0, maxPR: Math.min(window.devicePixelRatio || 1, 1.5), mode: (() => { try { return localStorage.getItem('rht-gfx') || 'auto'; } catch (e) { return 'auto'; } })() };
 function litePR() {
   const w = app.clientWidth || innerWidth, h = app.clientHeight || innerHeight, t = LITE.tier;
   LITE.maxPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 1.15, Math.sqrt(1.4e6 / Math.max(1, w * h))));
   return t >= 3 ? 1 : t >= 2 ? Math.max(1, LITE.maxPR - 0.25) : LITE.maxPR;
 }
 function liteApply() {
-  const t = LITE.tier, sm = 1024, pr = litePR();
+  const t = LITE.tier, sm = t >= 2 ? 512 : 1024, pr = litePR();
   if (sun.shadow.mapSize.x !== sm) { sun.shadow.mapSize.set(sm, sm); sun.shadow.radius = TH.shRadius * sm / 2048; shadowKey = ''; if (SHC.cam) shcTargets(); }
+  const shadows = t < 3; if (sun.castShadow !== shadows) sun.castShadow = shadows;
+  // at the lowest tier the woods thin out: every instanced batch draws a share of its trees
+  const share = t >= 3 ? 0.55 : 1;
+  if (LITE.share !== share) { LITE.share = share; scene.traverse(o => { if (o.isInstancedMesh) { if (o.userData.fullCount === undefined) o.userData.fullCount = o.count; o.count = Math.max(1, Math.round(o.userData.fullCount * share)); } }); }
+  const want = t >= 2 ? 0 : 2; if (rtMain && rtMain.samples !== undefined && rtMain.samples !== want) { fit(); return; }
   if (Math.abs(renderer.getPixelRatio() - pr) > 0.01) { renderer.setPixelRatio(pr); fit(); }
 }
 function coolSkip(now) {
