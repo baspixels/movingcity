@@ -2247,6 +2247,8 @@ function townBuild(i) {
     townFacility(1, 308, -16, T.works, T.col[2], T.col[1], true);
     townFacility(1, 268, -52, T.second.fac, T.col[1], T.col[0], false, true);
     townHomes(1, 268, 22); townHomes(1, 308, 22);
+    for (const x of [268, 308]) { BX(40, 0.42, 4.4, roadMat, x, -0.15, HOSP.lane, null, NC); for (let k = -16; k <= 16; k += 4) BX(1.6, 0.012, 0.12, '#FCFCF6', x + k, 0.07, HOSP.lane, null, NC); }
+    BX(6, 0.42, 7, roadMat, HOSP.bayX, -0.15, -2.2, null, NC); BX(6, 0.42, 9, roadMat, HOSP.hospital[0], -0.15, -3.2, null, NC);
     FORCE = prev; if (batchHere) flushBatch(); return;
   }
   const T = TOWNS[i], I = townIsle(i), p = townPos(i), prev = FORCE; FORCE = 'base';
@@ -2267,6 +2269,7 @@ function townBuild(i) {
   townFacility(i, p.x - 22, ZR - 14, T.fac, T.col[0], T.col[1]);
   townFacility(i, p.x + 22, ZR - 14, T.works || 'Works', T.col[2], T.col[1], true);
   townHomes(i, p.x - 22, ZR + 20); townHomes(i, p.x + 22, ZR + 20);
+  for (const sx of [-1, 1]) { const lx = p.x + sx * 21.5; BX(37, 0.42, 4.4, roadMat, lx, -0.15, ZR + 32, null, NC); for (let k = -16; k <= 16; k += 4) BX(1.6, 0.012, 0.12, '#FCFCF6', lx + k, 0.07, ZR + 32, null, NC); }
   if (T.second) townFacility(i, p.x + 22, ZR - 28, T.second.fac, T.col[1], T.col[0], false, true);
   townLandmark(i, p.x + 46, ZR);
   townWoods(I, p);
@@ -2420,9 +2423,10 @@ function townSpawnCall(i, second) {
   const T = TOWNS[i], ts = townState(i), homes = TW.homes && TW.homes[i]; if (!homes || !homes.length) return;
   if (townCalls(i).filter(c => c.second === !!second).length >= 4) return;
   const h = homes[(Math.random() * homes.length) | 0];
-  const c = { town: i, second: !!second, x: h[0] + rnd(-1, 1), z: h[1] + rnd(-0.5, 0.5), age: 0, patience: second ? 90 : 75, taken: null, mark: null };
+  const c = { town: i, second: !!second, x: h[0] + rnd(-1, 1), z: second ? h[1] + rnd(-0.5, 0.5) : i === 1 ? HOSP.kerb : townPos(i).z + 2 + 29.8, age: 0, patience: second ? 90 : 75, taken: null, mark: null };
   c.mark = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.9, 10), new THREE.MeshStandardMaterial({ color: col(second ? T.col[1] : T.col[0]), emissive: col(second ? T.col[1] : T.col[0]), emissiveIntensity: 0.5 }));
   c.mark.rotation.x = Math.PI; c.mark.position.set(c.x, 3.2, c.z); scene.add(c.mark);
+  c.ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.25, 28), new THREE.MeshBasicMaterial({ color: col(second ? T.col[1] : T.col[0]), transparent: true, opacity: 0.85, depthWrite: false })); c.ring.rotation.x = -Math.PI / 2; c.ring.position.set(c.x, 0.08, c.z); scene.add(c.ring);
   TW.calls.push(c);
 }
 function townSend(i, second) {
@@ -2430,30 +2434,45 @@ function townSend(i, second) {
   if (!idle) { toast(`Every ${(second ? TOWNS[i].second.veh : TOWNS[i].veh).toLowerCase()} is out. Build another at the works.`); return false; }
   if (!call) { toast(`No ${(second ? TOWNS[i].second.need : TOWNS[i].need)} waiting right now.`); return false; }
   call.taken = idle; idle.call = call; idle.status = 'out'; idle.t = 0;
-  idle.path = [[call.x, call.z + 3.6], [call.x, call.z + 1.6, 'serve'], [idle.home[0], idle.home[1] + 6], [idle.home[0], idle.home[1], 'park']]; idle.seg = 0;
+  idle.path = townRoute(i, idle, call); idle.seg = 0;
   ringPulse({ vehicle: { x: idle.x, z: idle.z, len: 3.2, w: 1.6, heading: idle.heading, type: 'cab' } }); snd.horn('cab');
   return true;
+}
+// Hospital Town's streets: the main road's lanes, the hospital forecourt and the ambulance bay
+const HOSP = { road: 3.6, roadBack: 7.4, lane: 34.6, kerb: 32.4, hospital: [231, -1.6], bayX: 265, drive: -3 };
+function townRoute(i, v, c) {
+  const h = v.home;
+  if (v.second) return [[c.x, c.z + 1.2, 'serve'], [h[0], h[1], 'park']];   // the drone (and any second vehicle) flies straight there
+  if (i !== 1) {   // the generated towns: apron -> main road -> cross street -> the homes' lane -> back to the facility
+    const p = townPos(i), ZR = p.z + 2, lane = ZR + 32, side = c.x < p.x ? -1 : 1;
+    return [[h[0], ZR - 2], [p.x + 1.5 * side, ZR - 2], [p.x + 1.5 * side, lane], [c.x, lane, 'pick'], [p.x - 1.5 * side, lane], [p.x - 1.5 * side, ZR + 2], [h[0], ZR + 2], [h[0], ZR - 6, 'serve'], [h[0], h[1], 'park']];
+  }
+  // every leg on tarmac: the bay's driveway, the main road, a cross street, the homes' lane, and back by the hospital
+  const left = c.x < 288 ? 248 : 288, right = left + 40, down = right + 1.5, up = left - 1.5;
+  return [[h[0], HOSP.drive], [h[0], HOSP.road], [down, HOSP.road], [down, HOSP.lane], [c.x, HOSP.lane, 'pick'], [up, HOSP.lane], [up, HOSP.roadBack],
+    [HOSP.hospital[0], HOSP.roadBack], [HOSP.hospital[0], HOSP.hospital[1], 'serve'], [HOSP.hospital[0], HOSP.road], [h[0], HOSP.road], [h[0], HOSP.drive], [h[0], h[1], 'park']];
 }
 function townVehStep(v, dt) {
   if (v.status !== 'out' || !v.path) return;
   if (v.pause > 0) { v.pause -= dt; return; }
   const wp = v.path[v.seg]; if (!wp) return;
-  const dx = wp[0] - v.x, dz = wp[1] - v.z, d = Math.hypot(dx, dz), sp = 7 * dt;
+  const dx = wp[0] - v.x, dz = wp[1] - v.z, d = Math.hypot(dx, dz), sp = (v.second && v.town === 1 ? 9 : 7) * dt;
   if (d > 1e-3) v.heading = turn(v.heading, Math.atan2(-dz, dx), 6 * dt);
   if (d <= sp) {
     v.x = wp[0]; v.z = wp[1]; v.seg++;
-    if (wp[2] === 'serve') { v.pause = 1.4; const c = v.call; if (c) { townServed(v.town, c); } }
+    if (wp[2] === 'pick') { v.pause = 1.2; const c = v.call; if (c) { c.picked = true; if (c.mark) c.mark.visible = false; popup('Picked up', c.x, 2.4, c.z, 'small'); } }
+    if (wp[2] === 'serve') { v.pause = 1.4; const c = v.call; if (c) { townServed(v.town, c, v); } }
     if (wp[2] === 'park') { v.status = 'idle'; v.path = null; v.call = null; v.heading = Math.PI / 2; }
   } else { v.x += dx / d * sp; v.z += dz / d * sp; }
 }
-function townServed(i, c) {
+function townServed(i, c, v) {
   const T = TOWNS[i], ts = townState(i);
-  if (c.mark) scene.remove(c.mark);
+  if (c.mark) scene.remove(c.mark); if (c.ring) scene.remove(c.ring);
   TW.calls.splice(TW.calls.indexOf(c), 1);
   if (c.second) ts.served2++; else ts.served++;
-  const fare = c.second ? 60 : 45;
+  const fare = c.second ? 60 : 45, px = v ? v.x : c.x, pz = v ? v.z : c.z;
   st.coins += fare; bumpCoins(); st.earned += fare;
-  popup('+' + fare, c.x, 2.4, c.z, 'coin');
+  popup('+' + fare, px, 2.4, pz, 'coin');
   ts.fr = Math.max(0, ts.fr - 10);
   if (!reduceMotion) spawnHeart(c.x, 1.6, c.z, 0, false);
   townProgress(i);
@@ -2478,15 +2497,15 @@ function townTick(dt) {
     if (ts.app2) { for (const c of townCalls(i)) if (!c.taken && c.age > 2 && c.second) townSend(i, true); }
     // frustration from waiting calls
     let pressure = 0;
-    for (const c of townCalls(i)) { c.age += dt; if (!c.taken) pressure += Math.max(0, (c.age / c.patience - 0.5) * 2); if (c.age > c.patience && !c.taken) { scene.remove(c.mark); TW.calls.splice(TW.calls.indexOf(c), 1); ts.fr = Math.min(100, ts.fr + 9); st.lost++; } }
+    for (const c of townCalls(i)) { c.age += dt; if (!c.taken) pressure += Math.max(0, (c.age / c.patience - 0.5) * 2); if (c.age > c.patience && !c.taken) { scene.remove(c.mark); if (c.ring) scene.remove(c.ring); TW.calls.splice(TW.calls.indexOf(c), 1); ts.fr = Math.min(100, ts.fr + 9); st.lost++; } }
     ts.fr = clamp(ts.fr + dt * (0.5 * Math.min(1, pressure / 2) - (pressure === 0 ? 0.6 : 0)), 0, 100);
     if (ts.fr >= 100 && !ts.locked) townLock(i);
     for (const v of townVehicles(i)) townVehStep(v, dt);
   }
 }
 function townRender() {
-  for (const v of TW.veh) { v.group.position.set(v.x, 0, v.z); v.group.rotation.y = v.heading; }
-  for (const c of TW.calls) if (c.mark) { c.mark.position.y = 3.0 + Math.sin(time * 3 + c.x) * 0.2; c.mark.rotation.y = time * 1.5; c.mark.visible = !c.taken; }
+  for (const v of TW.veh) { const fly = v.second && v.town === 1; const yT = fly && v.status === 'out' ? 7 : 0; v.y = v.y === undefined ? 0 : v.y + (yT - v.y) * 0.08; v.group.position.set(v.x, v.y, v.z); v.group.rotation.y = v.heading; }
+  for (const c of TW.calls) if (c.mark) { c.mark.position.y = 3.0 + Math.sin(time * 3 + c.x) * 0.2; c.mark.rotation.y = time * 1.5; c.mark.visible = !c.picked; if (c.ring) { const left = Math.max(0, 1 - c.age / c.patience); c.ring.scale.setScalar(0.4 + 1.6 * left); c.ring.visible = !c.picked; c.ring.material.opacity = c.taken ? 0.35 : 0.85; } }
 }
 /* ---- works and apps: built with coins, a short timer each ---- */
 function townBuy(i, what) {
@@ -2513,7 +2532,7 @@ function townMaster(i) {
 }
 function townLock(i) {
   const T = TOWNS[i], ts = townState(i); ts.locked = 1; ts.state = 'locked';
-  for (const c of townCalls(i)) { scene.remove(c.mark); } TW.calls = TW.calls.filter(c => c.town !== i);
+  for (const c of townCalls(i)) { scene.remove(c.mark); if (c.ring) scene.remove(c.ring); } TW.calls = TW.calls.filter(c => c.town !== i);
   t1Banner(`${T.name} is locked`, `Too many ${T.need} went unserved. Reopen it for ${fmt(townReopenCost(i))} coins.`, T1_ICON.strike, 'bad');
   townPanel();
 }
@@ -2539,6 +2558,7 @@ function townEnter(i) {
     t1Banner(`Welcome to ${T.name}`, T.theme + '. Tap the ' + T.fac.toLowerCase() + ' to send your first ' + T.veh.toLowerCase() + '.', T1_ICON.app || '', 'good');
   } else { townBuild(i); if (!townVehicles(i).length) townAddVehicle(i, false); }
   TW.focus = i; townFly(i); townPanel(); writeSave();
+  { const t = $('#toast'); if (t) t.classList.remove('show'); }
 }
 function townCam(x, z) {
   if (Math.abs(camTarget.x - x) < 0.01 && Math.abs(camTarget.z - z) < 0.01) return false;
@@ -2549,14 +2569,14 @@ function townCam(x, z) {
   return true;
 }
 function townFly(i) {
-  const p = townPos(i), r = i === 0 ? 100 : i === 1 ? 100 : TOWN_R - 6;
+  const p = i === 1 ? { x: 268, z: -6 } : townPos(i), r = i === 0 ? 100 : i === 1 ? 56 : TOWN_R - 6;
   const moved = townCam(i === 0 ? 0 : p.x, i === 0 ? -1.6 : p.z);
   BOUNDS = [new THREE.Vector3(p.x - r, 0, p.z - r), new THREE.Vector3(p.x + r, 0, p.z - r), new THREE.Vector3(p.x - r, 0, p.z + r), new THREE.Vector3(p.x + r, 0, p.z + r), new THREE.Vector3(p.x, 12, p.z)];
   camAnim.from = { L: base.L, R: base.R, T: base.T, B: base.B, bw: base.bw, bh: base.bh, zoom: view.zoom, ox: view.ox, oy: view.oy };
   camAnim.to = frameTarget().box; camAnim.t = 0; camAnim.dur = 2.6;
   if (moved) { Object.assign(base, camAnim.to); view.zoom = 1; view.ox = 0; view.oy = 0; camAnim.t = 1; applyView(); }
   // the haze follows the focused island
-  if (i === 0) syncLand(); else { scene.fog.near = 1000 + p.x; scene.fog.far = 1000 + p.z; FOGX = 600; }
+  if (i === 0) syncLand(); else { const q = townPos(i); scene.fog.near = 1000 + q.x; scene.fog.far = 1000 + q.z; FOGX = 600; }
 }
 function townHome() { TW.focus = 0; const moved = townCam(0, -1.6); syncLand(); scene.fog.far = 44; BOUNDS = landBounds(); camAnim.from = { L: base.L, R: base.R, T: base.T, B: base.B, bw: base.bw, bh: base.bh, zoom: view.zoom, ox: view.ox, oy: view.oy }; camAnim.to = frameTarget().box; camAnim.t = 0; camAnim.dur = 2.6; if (moved) { Object.assign(base, camAnim.to); view.zoom = 1; view.ox = 0; view.oy = 0; camAnim.t = 1; applyView(); } townPanel(); }
 
@@ -2635,7 +2655,7 @@ function townPanel() {
       h += `<button type="button" class="tp send" data-a="send2"><b>Send ${T.second.veh.toLowerCase()}</b><small>${calls2} waiting</small></button><button type="button" class="tp" data-a="veh2"><b>Build ${T.second.veh.toLowerCase()}</b><small>180 coins</small></button>`;
       h += ts.app2 ? `<span class="tp done"><b>${T.second.app}</b><small>live</small></span>` : `<button type="button" class="tp" data-a="app2"><b>${T.second.app}</b><small>500 coins</small></button>`;
     }
-    h += `<span class="tp meter"><b>${T.name}</b><small>${ts.served} of ${T.target} ${T.need}${T.second ? `, ${ts.served2} of ${T.second.target} ${T.second.need}` : ''}</small><i style="--f:${ts.fr.toFixed(0)}%"></i></span>`;
+    h += `<span class="tp meter"><b>${townNext(i)}</b><small>${ts.served} of ${T.target} ${T.need}${T.second ? `, ${ts.served2} of ${T.second.target} ${T.second.need}` : ''}</small><i style="--f:${ts.fr.toFixed(0)}%"></i></span>`;
     el.innerHTML = h;
   }
   el.querySelectorAll('button[data-a]').forEach(b => b.addEventListener('click', () => {
@@ -2643,6 +2663,17 @@ function townPanel() {
     if (a === 'send') townSend(i, false); else if (a === 'send2') townSend(i, true); else if (a === 'reopen') townReopen(i); else townBuy(i, a);
     townPanel();
   }));
+}
+// the one thing to do next in a town, in plain words
+function townNext(i) {
+  const T = TOWNS[i], ts = townState(i), v = T.veh.toLowerCase(), n1 = townVehicles(i).filter(x => !x.second).length;
+  if (!ts.works) return `Serve ${3 - ts.served} more ${T.need} by hand`;
+  if (n1 < 2) return `Build a second ${v} at the works`;
+  if (!ts.app) return ts.served >= 6 ? `Build ${T.app}` : `Serve ${6 - ts.served} more ${T.need}`;
+  if (T.second && !ts.phase2) return `Keep serving: ${T.target - ts.served} more ${T.need}`;
+  if (T.second && !ts.app2) return ts.served2 >= 3 ? `Build ${T.second.app}` : `Send the ${T.second.veh.toLowerCase()} by hand ${3 - ts.served2} more times`;
+  if (T.second) return `Keep going: ${Math.max(0, T.second.target - ts.served2)} more ${T.second.need}`;
+  return `Keep going: ${Math.max(0, T.target - ts.served)} more ${T.need}`;
 }
 function townNavGo(i) { if (i <= 0) { townHome(); return; } const ts = townState(i); if (ts.state === 'hidden') { toast('Master the town before this one first.'); return; } if (ts.state === 'locked') townReopen(i); townEnter(i); }
 function townNav() {
