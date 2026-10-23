@@ -1182,7 +1182,7 @@ function fitShadow() {
   shadowKey = key;
   const texel = 2 * Math.max(hx, hy) / sun.shadow.mapSize.x;
   const sx = Math.round(px / texel) * texel, sy = Math.round(py / texel) * texel;
-  fitShadow.box = { px: sx, py: sy, hx, hy, map: sun.shadow.mapSize.x };
+  fitShadow.box = { px: sx, py: sy, hx, hy, map: sun.shadow.mapSize.x }; fitShadow.ver = (fitShadow.ver || 0) + 1;
   const tx = r.x * sx + u.x * sy, tz = r.z * sx + u.z * sy;
   sun.target.position.set(tx, 0, tz);
   sun.position.copy(SUN_DIR).multiplyScalar(60).add(sun.target.position);
@@ -1270,9 +1270,9 @@ function renderFrame(t) {
   try { renderFrameInner(t); } finally { PERF.lastRender = performance.now() - rt0; PERF.render += PERF.lastRender; }
 }
 function renderFrameInner(t) {
-  const shk = shadowKey; fitShadow();
+  const sv = fitShadow.ver || 0; fitShadow();
   scene.updateMatrixWorld(); syncBlobs(); scene.autoUpdate = false;
-  shcFrame(shk !== shadowKey);
+  shcFrame(sv !== (fitShadow.ver || 0));
   renderer.setRenderTarget(rtMain); renderer.render(scene, camera);
   const u = comp.m.uniforms;
   u.tColor.value = rtMain.texture; u.tBlur.value = rtMain.texture; u.tBloom.value = rtMain.texture; u.time.value = t; u.tilt.value = 0;
@@ -2569,7 +2569,7 @@ function townFly(i) {
   const moved = townCam(i === 0 ? 0 : p.x, i === 0 ? -1.6 : p.z);
   BOUNDS = [new THREE.Vector3(p.x - r, 0, p.z - r), new THREE.Vector3(p.x + r, 0, p.z - r), new THREE.Vector3(p.x - r, 0, p.z + r), new THREE.Vector3(p.x + r, 0, p.z + r), new THREE.Vector3(p.x, 12, p.z)];
   camAnim.from = { L: base.L, R: base.R, T: base.T, B: base.B, bw: base.bw, bh: base.bh, zoom: view.zoom, ox: view.ox, oy: view.oy };
-  camAnim.to = frameTarget().box; camAnim.t = 0; camAnim.dur = 2.6;
+  camAnim.to = frameTarget().box; camAnim.t = 0; camAnim.dur = 4.2;
   if (moved) { Object.assign(base, camAnim.to); view.zoom = 1; view.ox = 0; view.oy = 0; camAnim.t = 1; applyView(); }
   // the haze follows the focused island
   if (i === 0) syncLand(); else { const q = townPos(i); scene.fog.near = 1000 + q.x; scene.fog.far = 1000 + q.z; FOGX = 600; }
@@ -9966,17 +9966,17 @@ function focusCam(rdt) {
   if (!CAMF.on && hotId && !quiet && time - CAMF.userT > 6 && (CAMF.cool[hotId] || 0) < time && speed > 0) {
     CAMF.on = true; CAMF.id = hotId; CAMF.hold = 0; CAMF.sent0 = st.stats.sent[hotId] || 0;
     if (!CAMF.saved) CAMF.saved = { zoom: view.zoom, ox: view.ox, oy: view.oy };
-    camfGo(camfLook(hotId), 1.2);
-  } else if (CAMF.on && hotId && hotId !== CAMF.id) { CAMF.id = hotId; CAMF.hold = 0; CAMF.sent0 = st.stats.sent[hotId] || 0; camfGo(camfLook(hotId), 1.0); }
+    camfGo(camfLook(hotId), 3.2);
+  } else if (CAMF.on && hotId && hotId !== CAMF.id) { CAMF.id = hotId; CAMF.hold = 0; CAMF.sent0 = st.stats.sent[hotId] || 0; camfGo(camfLook(hotId), 2.6); }
   if (CAMF.on) {
     const id = CAMF.id, q = queues[id];
     // a ride sent there since the camera came in, a thinner crowd or a calmer meter all count as handled
     const eased = (st.stats.sent[id] || 0) > CAMF.sent0 || reservedFor(id) > 0 || (!st.t1.strike[id] && (q.length < cfg.stops[id].cap * 0.6 || focusFr(id) < 30));
     CAMF.hold = eased ? CAMF.hold + rdt : 0;
     if (eased && reservedFor(id) > 0) CAMF.hold = Math.max(CAMF.hold, 0);
-    if (CAMF.hold > 1.6) {
+    if (CAMF.hold > 2.6) {
       CAMF.on = false; CAMF.cool[id] = time + 12;
-      if (CAMF.saved) camfGo(CAMF.saved, 1.2);
+      if (CAMF.saved) camfGo(CAMF.saved, 3.2);
       CAMF.saved = null;
     }
   }
