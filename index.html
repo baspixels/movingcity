@@ -901,19 +901,29 @@ const TYPES = ['auto', 'cab', 'bus', 'metro'];
 const VNAME = { auto: 'Auto', cab: 'Cab', bus: 'Bus', metro: 'Metro train' };
 const VONE = { auto: 'auto', cab: 'cab', bus: 'bus', metro: 'metro train' };
 const VMANY = { auto: 'autos', cab: 'cabs', bus: 'buses', metro: 'trains' };
-const SNAME = { auto: 'Auto stand', cab: 'Cab bay', bus: 'Bus stop', metro: 'Metro station', metro2: 'Far platform', east: 'East platform', east2: 'East far platform', big: 'Waiting bay', side: 'Side street bay' };
+const SNAME = { auto: 'Auto stand', cab: 'Cab bay', bus: 'Bus stop', metro: 'Metro station', metro2: 'Far platform', east: 'East platform', east2: 'East far platform', big: 'Waiting bay', side: 'Side street bay', lotS: 'Main road bay', lotN: 'Back street bay' };
 /* The crowd. Everyone who wants a ride waits in one of two waiting bays: the big bay on the main road frontage of
    Block 01, or Block 02's bay on the side street. Any ride serves either bay; a ride goes to the bay with more people
    waiting and takes the nearest of them first. */
-const QIDS = ['big', 'side'];
-const QPLOT = { big: 'home', side: 'cab' };
-function qOpen(id) { return id === 'big' ? !!(st && st.unlocked.auto) : id === 'side' ? !!(st && st.unlocked.cab) : (id === 'metro2' || id === 'east' || id === 'east2') ? !!(st && st.unlocked.metro) : !!(st && st.unlocked[id]); }
-function qType(id) { return id === 'big' ? 'auto' : id === 'side' ? 'cab' : id; }
+const QIDS = ['big', 'side', 'lotS', 'lotN'];
+const QPLOT = { big: 'home', side: 'cab', lotS: 'home', lotN: 'home' };
+/* The lot bays: two more waiting bays that open on the empty lots after a while, once enough riders have been served.
+   The main road bay sits on the south lot's road frontage and is served from the main road like the big bay; the back
+   street bay sits on the north lot's frontage and is served from the back street, on the way round the block. */
+const LOT_X = 54;
+const LOTBAYS = { lotS: { need: 40, needs: 'auto', rect: [47.5, 60.5, -6.2, -1.5], sign: [54, -3.6], msg: 'A new waiting bay has opened on the main road, by the lawn. Riders are gathering there.' },
+  lotN: { need: 90, needs: 'cab', rect: [47.5, 60.5, -42.4, -36.0], sign: [54, -40], msg: 'Another waiting bay has opened on the back street, behind the lawn. Rides reach it on the way round the block.' } };
+function bayOpen(id) { return !!(st && st.bays && st.bays[id]); }
+function qOpen(id) { return id === 'big' ? !!(st && st.unlocked.auto) : id === 'side' ? !!(st && st.unlocked.cab) : LOTBAYS[id] ? bayOpen(id) : (id === 'metro2' || id === 'east' || id === 'east2') ? !!(st && st.unlocked.metro) : !!(st && st.unlocked[id]); }
+function qType(id) { return id === 'big' || id === 'lotS' ? 'auto' : id === 'side' || id === 'lotN' ? 'cab' : id; }
 // the bays follow the ride settings: the big bay fills at the auto rate (plus the bus rate once buses run), Block 02's at the cab rate
 function syncStopCfg() {
   const a = cfg.stops.auto, c = cfg.stops.cab, b = cfg.stops.bus, bus = !!(st && st.unlocked.bus);
   cfg.stops.big = { every: bus ? 1 / (1 / a.every + 1 / b.every) : a.every, cap: a.cap + (bus ? Math.round(b.cap * 0.6) : 0), patience: a.patience };
   cfg.stops.side = { every: c.every, cap: c.cap, patience: c.patience };
+  // the lot bays fill a little slower than the bays they echo
+  cfg.stops.lotS = { every: a.every * 1.5, cap: Math.max(6, Math.round(a.cap * 0.6)), patience: a.patience };
+  cfg.stops.lotN = { every: c.every * 1.4, cap: Math.max(6, Math.round(c.cap * 0.8)), patience: c.patience };
   cfg.stops.metro2 = Object.assign({}, cfg.stops.metro); cfg.stops.east = Object.assign({}, cfg.stops.metro, { every: cfg.stops.metro.every * 1.6 }); cfg.stops.east2 = Object.assign({}, cfg.stops.east);
 }
 function freeAt(id) { return queues[id].length - reservedFor(id); }
@@ -3105,6 +3115,10 @@ function buildIslands() {
   buildFerries();
 }
 
+function LAWN(x0, x1, z0, z1) {
+  BX(x1 - x0, 0.03, z1 - z0, '#D2C5AE', (x0 + x1) / 2, 0.015, (z0 + z1) / 2, null, NC);
+  BX(x1 - x0 - 2.4, 0.05, z1 - z0 - 2.4, grassMat, (x0 + x1) / 2, 0.025, (z0 + z1) / 2, null, NC);
+}
 function FREE_LOT(x0, x1, z0, z1, plot) {
   const keep = FORCE; FORCE = plot;
   BX(x1 - x0, 0.03, z1 - z0, '#D2C5AE', (x0 + x1) / 2, 0.015, (z0 + z1) / 2, null, NC);
@@ -3181,8 +3195,44 @@ function blkPhase2() {
   }
   FORCE = 'yard'; BX(30, 0.02, -4.95 - (ZB + 1.2), grassMat, -16, 0.01, (-4.95 + ZB + 1.2) / 2, null, NC);
   BX(1.5, 0.02, 3.11, grassMat, -1.75, 0.01, -3.395, null, NC); BX(2, 0.02, 3.11, grassMat, -30, 0.01, -3.395, null, NC);
-  // the two free blocks: levelled lots, painted out and left empty
-  FREE_LOT(49, 79, ZB + 1.2, -1.84, 'base'); FREE_LOT(49, 79, ZN, BR[0] - 1.2, 'base');
+  // the two free blocks: lawns edged with pavers, trees across them, and a paved apron on each road frontage where a
+  // waiting bay opens later
+  FORCE = 'base';
+  LAWN(49, 79, ZB + 1.2, -1.84); LAWN(49, 79, ZN, BR[0] - 1.2);
+  BX(13.4, 0.06, 5.4, paverMat, 54, 0.03, -4.4, null, NC); BX(13.4, 0.06, 6.4, paverMat, 54, 0.03, -39.9, null, NC);
+  for (const [x, z, sc] of [[64, -6, 1.0], [72, -6.5, 0.9], [52, -13, 1.05], [61, -16, 0.95], [69, -15, 1.0], [76, -11, 0.9], [55, -24, 0.9], [64, -25, 1.05], [73, -24, 0.95]]) plant('round', x, 0.05, z, sc);
+  for (const z of [-9, -14, -19, -24]) plant('cypress', 78.0, 0.05, z, 0.75);
+  for (const [x, z] of [[57, -9], [70, -10.5], [59, -21], [77, -27]]) plant('flowers', x, 0.05, z, 0.8);
+  for (let x = 62.4; x < 78; x += 2.2) plant('bush', x, 0.05, -2.9, rnd(0.4, 0.5), 5);
+  for (const [x, z, sc] of [[64, -40, 1.0], [72, -40.5, 0.9], [55, -47, 1.05], [63, -48, 0.95], [70, -47.5, 1.0], [77, -45, 0.9], [53, -55, 0.9], [61, -56, 1.05], [69, -56, 0.95], [76, -54, 1.0], [57, -62, 0.9], [66, -63, 1.0], [74, -62, 0.95]]) plant('round', x, 0.05, z, sc);
+  for (const z of [-45, -50, -55, -60]) plant('cypress', 50.0, 0.05, z, 0.75);
+  for (const [x, z] of [[58, -43.5], [72, -51], [64, -59.5], [52, -65]]) plant('flowers', x, 0.05, z, 0.8);
+  for (let x = 62.4; x < 78; x += 2.2) plant('bush', x, 0.05, -37.6, rnd(0.4, 0.5), 5);
+  // the main road bay, built like the big bay: a raised platform behind the pavement, a canopy and benches
+  FORCE = 'lotS';
+  BX(8.4, 0.16, 3.56, paverMat, 54, 0.08, -3.62, null, NC);
+  BX(0.1, 0.2, 3.56, '#B7ADA2', 49.85, 0.1, -3.62, null, NC); BX(0.1, 0.2, 3.56, '#B7ADA2', 58.15, 0.1, -3.62, null, NC);
+  blkCanopy('auto', 49.8, 58.2, -5.4, -3.3, C.yellow, '#306832', 'WAITING BAY', '#EDDD9D', 1.9);
+  for (const bx of [52.0, 56.0]) {
+    RB(3.0, 0.08, 0.34, 0.03, T('auto', C.wood), bx, 0.6, -5.0); RB(3.0, 0.3, 0.06, 0.03, T('auto', C.wood), bx, 0.82, -5.2);
+    for (const dx of [-1.3, 1.3]) BX(0.08, 0.44, 0.3, T('auto', C.dark), bx + dx, 0.38, -5.0, null, NC);
+  }
+  for (const x of [49.6, 58.4]) BX(0.1, 0.012, 3.3, '#FCFCF6', x, 0.021, 3.15, null, NC);
+  for (let x = 50.2; x < 58.1; x += 1.2) BX(0.7, 0.012, 0.1, '#FCFCF6', x, 0.021, 4.8, null, NC);
+  roadText('STOP', 52.6, 2.6, 1.4, 0.5);
+  // the back street bay: the same, facing the back street, with its canopy at the lawn side
+  FORCE = 'lotN';
+  BX(8.4, 0.16, 3.56, paverMat, 54, 0.08, -40.18, null, NC);
+  BX(0.1, 0.2, 3.56, '#B7ADA2', 49.85, 0.1, -40.18, null, NC); BX(0.1, 0.2, 3.56, '#B7ADA2', 58.15, 0.1, -40.18, null, NC);
+  blkCanopy('auto', 49.8, 58.2, -41.96, -39.86, C.yellow, '#306832', 'WAITING BAY', '#EDDD9D', 1.9);
+  for (const bx of [52.0, 56.0]) {
+    RB(3.0, 0.08, 0.34, 0.03, T('auto', C.wood), bx, 0.6, -41.56); RB(3.0, 0.3, 0.06, 0.03, T('auto', C.wood), bx, 0.82, -41.76);
+    for (const dx of [-1.3, 1.3]) BX(0.08, 0.44, 0.3, T('auto', C.dark), bx + dx, 0.38, -41.56, null, NC);
+  }
+  for (const x of [49.6, 58.4]) BX(0.1, 0.012, 2.8, '#FCFCF6', x, 0.021, -34.1, null, NC);
+  for (let x = 50.2; x < 58.1; x += 1.2) BX(0.7, 0.012, 0.1, '#FCFCF6', x, 0.021, -32.75, null, NC);
+  roadText('STOP', 52.6, -34.6, 1.4, 0.5);
+  FORCE = 'base';
   // the town's links to the other islands: the intercity station on the main road, the ferry station by its pier
   FORCE = 'base'; hubIntercity(91, 'INTERCITY'); hubFerry(ISLE[0], 96.5, -45, 1);
   // the railway station in the east park, its platform beside the track (it opens with the park)
@@ -4549,6 +4599,11 @@ const STOPS = {
            entries: [[26.1, -3.9], [23.0, -3.9], [29.0, -3.9]], exits: [[25.0, -4.1], [28.0, -4.1]] },
   side:  { qx0: 40.6, qz0: -13.0, axis: 'z', dx: -0.6, cols: 6, vis: 12, y: 0.16, face: 0, look: -Math.PI / 4, anchor: [39.6, 3.2, -11.5], hit: [38.6, 1.0, -11.5, 5.0, 2.4, 3.8],
            entries: [[34.6, -11.5], [34.6, -12.6]], exits: [[34.5, -11.0], [34.5, -12.4]] },
+  // the lot bays: the south lot's bay on the main road pavement, the north lot's on the back street pavement
+  lotS:  { qx0: 50.4, qz0: 0.9, dz: -0.6, cols: 12, vis: 16, y: 0.16, face: FACE_ROAD, look: LOOK_ROAD, anchor: [54.0, 3.2, -0.6], hit: [54.0, 1.0, -0.5, 8.4, 2.4, 3.6],
+           entries: [[54.0, -3.9], [52.0, -3.9], [56.0, -3.9]], exits: [[53.0, -4.1], [55.0, -4.1]] },
+  lotN:  { qx0: 50.4, qz0: -36.2, dz: -0.6, cols: 12, vis: 16, y: 0.16, face: FACE_ROAD, look: LOOK_ROAD, anchor: [54.0, 3.2, -38.4], hit: [54.0, 1.0, -38.6, 8.4, 2.4, 4.8],
+           entries: [[54.0, -43.0], [52.0, -43.0], [56.0, -43.0]], exits: [[53.0, -43.2], [55.0, -43.2]] },
   // the rides: tapping a bay sends one of its rides to the crowd
   auto:  { anchor: [14.1, 3.2, -3.0], hit: [14.0, 1.0, -3.0, 9.8, 2.4, 5.6] },
   cab:   { anchor: [36.0, 3.2, -5.9], hit: [35.6, 1.0, -5.9, 4.4, 2.4, 8.6] },
@@ -6744,6 +6799,9 @@ function buildWorld() {
   { const root = new THREE.Group(), ground = new THREE.Group(), build = new THREE.Group(), wild = new THREE.Group();
     root.add(ground, build); scene.add(root, wild);
     PG.shops = { root, ground, build, wild, plants: [], wildPlants: [], blobs: [], shown: true }; }
+  for (const id of ['lotS', 'lotN']) { const root = new THREE.Group(), ground = new THREE.Group(), build = new THREE.Group(), wild = new THREE.Group();
+    root.add(ground, build); scene.add(root, wild); root.visible = false;
+    PG[id] = { root, ground, build, wild, plants: [], wildPlants: [], blobs: [], shown: false }; }
   BATCH = [];
 
   // Grass all around. Every plot of land is a clay slab that rises out of the grass once it is bought.
@@ -8487,8 +8545,8 @@ function releasePerson(g) { g.visible = false; humanPool.push(g); }
 
 /* ---------------- game state ---------------- */
 let vehicles = [];
-let queues = { big: [], side: [], metro: [], metro2: [], east: [], east2: [] };
-const spawnAcc = { big: 0, side: 0, metro: 0, metro2: 0, east: 0, east2: 0 };
+let queues = { big: [], side: [], lotS: [], lotN: [], metro: [], metro2: [], east: [], east2: [] };
+const spawnAcc = { big: 0, side: 0, lotS: 0, lotN: 0, metro: 0, metro2: 0, east: 0, east2: 0 };
 const METRO_QS = ['metro', 'metro2', 'east', 'east2'];
 const movers = [];
 const lastLostPop = {};
@@ -8550,7 +8608,7 @@ function initState(saved) {
   flInit(saved);
   t1Init(saved);
   if (saved && saved.metro && typeof saved.metro === 'object') st.metro = { rides: saved.metro.rides | 0, tracks: saved.metro.tracks | 0 || 1 };
-  st.towns = saved && saved.towns && typeof saved.towns === 'object' ? saved.towns : {}; st.medals = saved && Array.isArray(saved.medals) ? saved.medals : []; st.rubies = saved && Number.isFinite(saved.rubies) ? saved.rubies : 0;
+  st.towns = saved && saved.towns && typeof saved.towns === 'object' ? saved.towns : {}; st.medals = saved && Array.isArray(saved.medals) ? saved.medals : []; st.rubies = saved && Number.isFinite(saved.rubies) ? saved.rubies : 0; st.bays = saved && saved.bays && typeof saved.bays === 'object' ? saved.bays : {};
   for (const v of TW.veh) scene.remove(v.group); TW.veh.length = 0; for (const c of TW.calls) scene.remove(c.mark); TW.calls.length = 0;
   for (let i = 1; i < TOWNS.length; i++) { const ts = townState(i); if (ts.state === 'active' || ts.state === 'done' || ts.state === 'locked') { townBuild(i); for (let k = 0; k < Math.max(1, ts.fleet | 0); k++) townAddVehicle(i, false); for (let k = 0; k < (ts.fleet2 | 0); k++) townAddVehicle(i, true); } }
   TW.focus = saved && Number.isInteger(saved.focus) && saved.focus < TOWNS.length ? saved.focus : 0; if (TW.focus) setTimeout(() => { townFly(TW.focus); townPanel(); }, 1200);
@@ -8580,7 +8638,7 @@ function initState(saved) {
 
 function serialize() {
   return { cfg: clone(cfg), st: { coins: st.coins, t: st.t, plots: st.plots, tripsToday: st.tripsToday,
-    served: st.served, lost: st.lost, earned: st.earned, hints: st.hints, xp: st.xp, levelRewarded: st.levelRewarded, goal: st.goal, stats: st.stats, town: st.town, blk: 1, savedAt: Date.now(), fleet: vehicles.map(v => ({ type: v.type, slot: v.slot })), sk: st.sk, fl: st.fl, t1: st.t1, metro: st.metro, towns: st.towns, medals: st.medals, rubies: st.rubies, focus: TW.focus } };
+    served: st.served, lost: st.lost, earned: st.earned, hints: st.hints, xp: st.xp, levelRewarded: st.levelRewarded, goal: st.goal, stats: st.stats, town: st.town, blk: 1, savedAt: Date.now(), fleet: vehicles.map(v => ({ type: v.type, slot: v.slot })), sk: st.sk, fl: st.fl, t1: st.t1, metro: st.metro, towns: st.towns, medals: st.medals, rubies: st.rubies, bays: st.bays || {}, focus: TW.focus } };
 }
 function loadSave() { try { const raw = localStorage.getItem(SAVE_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
 function writeSave() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(serialize())); } catch (e) { /* storage unavailable */ } }
@@ -8603,11 +8661,30 @@ function sideOut() {
 }
 const toLayby = () => [{ x: 42.6, z: -6.0, lane: 'sideN', slow: true, wait: 'box:side' }, { x: LAYBY.x, z: LAYBY.z, lane: 'sideN', slow: true, board: true, box: 'side' }];
 const toBigStop = (x, type) => [{ x: x, z: 3.0, lane: 'far', slow: true, board: true, box: 'big' }, { x: OFFE, z: 3.0, lane: 'far', exit: true }];
+// the main road bay: pull up at the painted stop in front of the south lot and drive on out east
+const toLotS = () => [{ x: LOT_X, z: 3.0, lane: 'far', slow: true, board: true, box: 'lotS' }, { x: OFFE, z: 3.0, lane: 'far', exit: true }];
+// the back street bay: up the side street, left along the back street, pull up in front of the north lot, then round and out
+const toLotN = () => [{ x: 42.6, z: -6.0, lane: 'sideN' }, { x: 42.6, z: -15.5, lane: 'sideN' }, { x: 42.6, z: -31.5, lane: 'sideN' }, { x: 44.6, z: -34.0 },
+  { x: 49.0, z: -34.0, lane: 'backE', slow: true, wait: 'box:lotN' }, { x: LOT_X, z: -34.0, lane: 'backE', slow: true, board: true, box: 'lotN' }].concat(sideOut().slice(4));
+const intoSide = () => [{ x: 40.6, z: 3.0, lane: 'far' }, { x: 42.6, z: 0.8 }];
+function lotPath(v) {
+  const sp = slotPos(v.slot), north = v.bay === 'lotN';
+  if (sp.bay === 'cab') {
+    if (north) return [{ x: 40.4, z: sp.z, slow: true }, { x: 42.6, z: sp.z - 1.8, lane: 'sideN' }].concat(toLotN().slice(1));
+    return [{ x: 40.4, z: sp.z, slow: true }, { x: 44.6, z: sp.z + 1.4 }, { x: 45.4, z: -0.2, lane: 'sideS', slow: true, wait: 'far' }, { x: 46.4, z: 2.4, cross: 'far' }, { x: 48.4, z: 3.0, lane: 'far' }].concat(toLotS());
+  }
+  let onto;
+  if (sp.bay === 'auto') onto = [{ x: sp.x, z: 0.3, slow: true, wait: 'far' }, { x: sp.x + 0.5, z: 2.1, cross: 'far' }, { x: sp.x + 1.9, z: 3.0, lane: 'far' }];
+  else if (sp.bay === 'bus') onto = [{ x: 0.6, z: sp.z, slow: true }, { x: 4.0, z: sp.z + 2.4 }, { x: 5.4, z: sp.z + 5.5, lane: 'westS' }, { x: 5.4, z: -2.0, lane: 'westS' }, { x: 5.4, z: 1.0, lane: 'westS', slow: true }, { x: 7.4, z: 3.0, lane: 'far' }];
+  else onto = [{ x: sp.x, z: 1.4, wait: 'far' }, { x: sp.x + 1.1, z: 2.7, cross: 'far' }, { x: sp.x + 2.6, z: 3.0, lane: 'far' }];
+  return onto.concat(north ? intoSide().concat(toLotN()) : toLotS());
+}
 // Autos and cabs leave their bays and drive to the bay with the crowd: the painted stop on the main road in front of the
 // big bay (eastbound, kerbside), or the lay-by on the side street in front of Block 02's bay (northbound, kerbside).
 // Every turn keeps left; 'wait' holds a vehicle until the lane it must cross is clear, 'cross' marks it blocking that lane.
 function outPath(v) {
   if (v.type === 'metro') return [{ x: STOPS.metro.pickX, z: LANES.mf.z, lane: 'mf', slow: true, board: true }, { x: MOFFE, z: LANES.mf.z, lane: 'mf', exit: true }];
+  if (LOTBAYS[v.bay]) return lotPath(v);
   const sp = slotPos(v.slot), side = v.bay === 'side';
   if (sp.bay === 'auto') {
     const onto = [{ x: sp.x, z: 0.3, slow: true, wait: 'far' }, { x: sp.x + 0.5, z: 2.1, cross: 'far' }, { x: sp.x + 1.9, z: 3.0, lane: 'far' }];
@@ -8683,7 +8760,12 @@ function redirectVehicle(v, bay) {
   const vc = cfg.vehicles[v.type];
   v.bay = bay; v.reserve = Math.min(vc.seats, freeAt(bay)); v.riders = 0; v.hold = null; v.cross = null; v.again = null;
   let out;
-  if (onFar) out = bay === 'side' ? [{ x: 40.6, z: 3.0, lane: 'far' }, { x: 42.6, z: 0.8 }].concat(toLayby(), sideOut()) : toBigStop(v.type === 'bus' ? STOP_BUS_X : STOP_BIG_X, v.type);
+  if (bay === 'lotS') { if (onFar) { if (v.x > LOT_X - 6) return false; out = toLotS(); } else out = uTurn().concat(toLotS()); }
+  else if (bay === 'lotN') {
+    if (onFar) { if (v.x > 38) return false; out = intoSide().concat(toLotN()); }
+    else out = v.x > 50 ? [{ x: 48.0, z: 8.0, lane: 'near', slow: true, wait: 'far' }, { x: 45.0, z: 6.2, cross: 'far' }, { x: 42.6, z: 2.6, cross: 'far' }].concat(toLotN().slice(1)) : uTurn().concat(intoSide(), toLotN());
+  }
+  else if (onFar) out = bay === 'side' ? [{ x: 40.6, z: 3.0, lane: 'far' }, { x: 42.6, z: 0.8 }].concat(toLayby(), sideOut()) : toBigStop(v.type === 'bus' ? STOP_BUS_X : STOP_BIG_X, v.type);
   else if (bay === 'side') {
     out = v.x > 50 ? [{ x: 48.0, z: 8.0, lane: 'near', slow: true, wait: 'far' }, { x: 45.0, z: 6.2, cross: 'far' }, { x: 42.6, z: 2.6, cross: 'far' }].concat(toLayby(), sideOut())
       : uTurn().concat([{ x: 40.6, z: 3.0, lane: 'far' }, { x: 42.6, z: 0.8 }], toLayby(), sideOut());
@@ -8697,7 +8779,7 @@ function redirectVehicle(v, bay) {
 function dispatchStop(id) {
   if (id === 'metro' || id === 'subway' || METRO_QS.includes(id)) { metroCall(); return; }
   if (QIDS.includes(id)) {   // a tap on a waiting bay: the ride that fits the crowd best goes there
-    if (!qOpen(id)) { toast(`Open the ${plotFor(id).name.toLowerCase()} first.`); return; }
+    if (!qOpen(id)) { toast(LOTBAYS[id] ? 'This bay opens later, once more riders have been served.' : `Open the ${plotFor(id).name.toLowerCase()} first.`); return; }
     const free = freeAt(id), idle = idleRides();
     if (!idle.length && free > 0) { const b = vehicles.find(x => x.status === 'back' && x.type !== 'metro' && x.lane === 'near' && x.seg === 0); if (b && redirectVehicle(b, id)) return; const c = vehicles.find(x => x.status === 'back' && x.type !== 'metro' && !x.again); if (c) { c.again = id; toast(`The next ${VONE[c.type]} home comes straight here.`); return; } }
     if (!idle.length) { toast(vehicles.some(v => v.type !== 'metro') ? 'Every ride is out on a trip. Build another to serve more riders.' : 'You have no rides yet. Build one from the bar below.'); return; }
@@ -8812,8 +8894,21 @@ function setLandInstant() {
     g.wild.visible = !open;
     for (const w of wildItems(g)) { w.m.visible = !open; w.m.scale.copy(w.sv); w.gone = open; w.puffed = false; }
   });
+  for (const id in LOTBAYS) { const g = PG[id]; if (!g) continue; const on = bayOpen(id); g.root.visible = on; g.shown = on; g.ground.position.y = 0; g.build.scale.y = 1; g.build.visible = true; }
   updateFlags();
   metroShops();
+}
+// a lot bay opens: its platform rises out of the lawn and the canopy grows up, the way a bought plot does
+function openBay(id) {
+  st.bays = st.bays || {}; st.bays[id] = true;
+  const g = PG[id], B = LOTBAYS[id]; if (!g) return;
+  g.root.visible = true; g.shown = false; g.ground.position.y = -0.46; g.build.scale.y = 0.001; g.build.visible = false;
+  reveals.push({ g, p: { x0: B.rect[0], x1: B.rect[1], z0: B.rect[2], z1: B.rect[3], sign: B.sign }, t: 0, edge: false });
+  toast(B.msg); ringPulse({ stop: id });
+}
+function baysTick() {
+  if (!st) return; st.bays = st.bays || {};
+  for (const id in LOTBAYS) { const B = LOTBAYS[id]; if (!st.bays[id] && st.served >= B.need && st.unlocked[B.needs]) openBay(id); }
 }
 function updateFlags() {
   PLOTS.forEach((p, i) => { if (PG[p.id].flag && i >= st.plots) for (const m of PG[p.id].flag) m.visible = i === st.plots; });
@@ -9341,6 +9436,7 @@ function leave(id, p) {
   }
 }
 function stepStops(dt) {
+  baysTick();
   const mult = demandAt(hourOf(st.t));
   syncStopCfg();
   for (const id of (qOpen('metro') ? QIDS.concat(METRO_QS) : QIDS)) {
